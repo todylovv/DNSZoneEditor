@@ -1,0 +1,284 @@
+import sys
+import json
+
+import graphviz
+from PyQt5.QtCore import QRegExp
+from PyQt5.QtGui import QRegExpValidator, QValidator, QPixmap, QIcon, QPalette, QColor
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QVBoxLayout, QWidget, QLabel, QLineEdit, QComboBox, QPushButton,
+    QTreeWidget, QTreeWidgetItem, QMessageBox, QFileDialog, QGraphicsView, QGraphicsScene, QDialog, QStyleFactory
+)
+
+
+class ImageViewer(QDialog):
+    def __init__(self, image_path):
+        super().__init__()
+        self.setWindowTitle("Image Viewer")
+        QApplication.setStyle(QStyleFactory.create("Fusion"))
+
+
+        layout = QVBoxLayout()
+
+        image_label = QLabel()
+        layout.addWidget(image_label)
+
+        pixmap = QPixmap(image_path)
+        image_label.setPixmap(pixmap)
+        self.setLayout(layout)
+
+
+class DNSZoneEditor(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("DNS Zone Editor")
+
+        QApplication.setStyle(QStyleFactory.create("Fusion"))
+        palette = QPalette()
+        palette.setColor(QPalette.Window, QColor(225, 230, 237))
+        palette.setColor(QPalette.WindowText, QColor(70, 70, 70))
+        palette.setColor(QPalette.Base, QColor(255, 255, 255))
+        palette.setColor(QPalette.AlternateBase, QColor(240, 245, 252))
+        palette.setColor(QPalette.Button, QColor(220, 225, 232))
+        palette.setColor(QPalette.ButtonText, QColor(70, 70, 70))
+        palette.setColor(QPalette.Highlight, QColor(135, 170, 213))
+        palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
+        QApplication.setPalette(palette)
+
+
+        # Create line edits
+        self.json_button = QPushButton("Generate JSON")
+        self.json_button.clicked.connect(self.generate_json)
+
+        self.image_button = QPushButton("Open Image")
+        self.image_button.clicked.connect(self.open_image_window)
+
+        self.parent_domain_combo = QComboBox()
+        self.name_edit = QLineEdit()
+        self.type_combo = QComboBox()
+        self.value_edit = QLineEdit()
+
+        self.type_combo.addItems(["A", "TXT", "CNAME"])
+
+        self.add_button = QPushButton("Add")
+        self.add_button.clicked.connect(self.add_record)
+
+        self.tree_widget = QTreeWidget()
+        self.tree_widget.setHeaderLabels(["Domain", "Type", "Value"])
+
+        self.domain_hierarchy = {}
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.json_button)
+
+        form_layout = QVBoxLayout()
+        form_layout.addWidget(QLabel("Parent Domain:"))
+        form_layout.addWidget(self.parent_domain_combo)
+        form_layout.addWidget(QLabel("Name:"))
+        form_layout.addWidget(self.name_edit)
+        form_layout.addWidget(QLabel("Type:"))
+        form_layout.addWidget(self.type_combo)
+        form_layout.addWidget(QLabel("Value:"))
+        form_layout.addWidget(self.value_edit)
+        form_layout.addWidget(self.add_button)
+
+        form_widget = QWidget()
+        form_widget.setLayout(form_layout)
+
+        layout.addWidget(form_widget)
+        layout.addWidget(self.tree_widget)
+        layout.addWidget(self.image_button)
+
+        central_widget = QWidget()
+        central_widget.setLayout(layout)
+        self.setCentralWidget(central_widget)
+
+    def open_image_window(self):
+        data = self.get_tree_data()
+
+        edges = []
+
+        def get_edges(treedict, parent=None):
+            name = next(iter(treedict.keys()))
+            if parent is not None and parent != "":
+                edges.append((parent, name))
+            if "children" in treedict[name]:
+                for item in treedict[name]["children"]:
+                    if isinstance(item, dict):
+                        get_edges(item, parent=name)
+                    else:
+                        edges.append((name, item))
+
+        get_edges(data)
+
+        output = 'strict digraph tree {\n'
+        for row in edges:
+            output += '    {0} -> {1};\n'.format(*row)
+        output += '}'
+        graph = graphviz.Source(output)
+
+        # Save the graph as an image file
+        graph.render(filename='graph', format='png', cleanup=True)
+
+        image_path = "graph.png"  # Replace with the actual path to the image
+        image_viewer = ImageViewer(image_path)
+        image_viewer.exec_()
+
+    def generate_json(self):
+        data = self.get_tree_data()
+        json_data = json.dumps(data, indent=4)
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save JSON File",
+            "",
+            "JSON Files (*.json)"
+        )
+
+        if file_path:
+            with open(file_path, "w") as file:
+                file.write(json_data)
+
+        print(json.dumps(data, indent=4), file=sys.stderr)
+
+        edges = []
+
+        def get_edges(treedict, parent=None):
+            name = next(iter(treedict.keys()))
+            if parent is not None and parent != "":
+                edges.append((parent, name))
+            if "children" in treedict[name]:
+                for item in treedict[name]["children"]:
+                    if isinstance(item, dict):
+                        get_edges(item, parent=name)
+                    else:
+                        edges.append((name, item))
+
+        get_edges(data)
+
+        print('strict digraph tree {')
+        for row in edges:
+            print('    {0} -> {1};'.format(*row))
+        print('}')
+
+    def get_tree_data(self):
+        top_level_items = self.tree_widget.invisibleRootItem().takeChildren()
+        data = {}
+        for item in top_level_items:
+            self.recursive_tree_data(item, data)
+        return data
+
+    def recursive_tree_data(self, tree_item, parent_dict):
+        domain = tree_item.text(0)
+        record_type = tree_item.text(1)
+        value = tree_item.text(2)
+
+        child_count = tree_item.childCount()
+        if child_count > 0:
+            children = []
+            for i in range(child_count):
+                child_item = tree_item.child(i)
+                child_data = {}
+                self.recursive_tree_data(child_item, child_data)
+                children.append(child_data)
+            item_data = {"type": record_type, "value": value, "children": children}
+        else:
+            item_data = {"type": record_type, "value": value}
+
+        parent_dict[domain] = item_data
+
+    def add_record(self):
+        if self.parent_domain_combo.currentIndex() == -1 and len(self.domain_hierarchy) > 0:
+            error_message = "Please select a parent domain."
+            self.display_error_message(error_message)
+            return
+
+        parent_domain = self.parent_domain_combo.currentText()
+        name = self.name_edit.text()
+        record_type = self.type_combo.currentText()
+        value = self.value_edit.text()
+
+        if parent_domain == "":
+            domain = name
+        else:
+            domain = f"{name}.{parent_domain}"
+
+        if record_type == "A":
+            if not self.validate_ip_address(value):
+                error_message = "Invalid IP address. Please enter a valid IP address."
+                self.display_error_message(error_message)
+                return
+        else:
+            value = value.strip()
+
+        if parent_domain in self.domain_hierarchy:
+            parent_item = self.domain_hierarchy[parent_domain]["item"]
+        else:
+            parent_item = QTreeWidgetItem(self.tree_widget, [parent_domain])
+            self.domain_hierarchy[parent_domain] = {"item": parent_item}
+
+        child_item = QTreeWidgetItem(parent_item, [name, record_type, value])
+
+        parent_item.addChild(child_item)
+
+        parent_item.setExpanded(True)
+
+        self.add_to_domain_hierarchy(child_item, record_type, value)
+
+        self.update_parent_domain_combo()
+
+        self.parent_domain_combo.setCurrentIndex(0)
+        self.name_edit.clear()
+        self.value_edit.clear()
+
+        parent_domain_data = self.get_domain_data(parent_domain)
+        if parent_domain_data is not None and "children" in parent_domain_data:
+            parent_domain_data["children"][name] = {"type": record_type, "value": value}
+
+    def get_domain_data(self, domain):
+        subdomains = domain.split('.')
+        current_hierarchy = self.domain_hierarchy
+
+        for subdomain in subdomains:
+            if subdomain not in current_hierarchy:
+                return None
+            current_hierarchy = current_hierarchy[subdomain]
+
+        return current_hierarchy
+
+    def add_to_domain_hierarchy(self, item, record_type, value):
+        subdomains = item.text(0).split('.')
+        current_hierarchy = self.domain_hierarchy
+
+        for subdomain in subdomains:
+            if subdomain not in current_hierarchy:
+                current_hierarchy[subdomain] = {"item": None}
+            current_hierarchy = current_hierarchy[subdomain]
+
+        current_hierarchy["type"] = record_type
+        current_hierarchy["value"] = value
+        current_hierarchy["item"] = item
+
+    def update_parent_domain_combo(self):
+        self.parent_domain_combo.clear()
+        self.parent_domain_combo.addItems(sorted(self.domain_hierarchy.keys()))
+
+    def validate_ip_address(self, ip_address):
+        ip_regex = QRegExp(
+            r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+        )
+        ip_validator = QRegExpValidator(ip_regex, self)
+
+        if ip_validator.validate(ip_address, 0)[0] == QValidator.Acceptable:
+            return True
+        else:
+            return False
+
+    def display_error_message(self, error_message):
+        QMessageBox.critical(self, "Error", error_message)
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = DNSZoneEditor()
+    window.show()
+    sys.exit(app.exec_())
