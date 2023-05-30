@@ -1,3 +1,4 @@
+import re
 import sys
 import json
 import traceback
@@ -101,6 +102,9 @@ class Ui_Ping(object):
 class DNSZoneEditor(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        self.domain_items = {}  # Dictionary to store domain items
+
         self.setWindowTitle("DNS Zone Editor")
 
         QApplication.setStyle(QStyleFactory.create("Fusion"))
@@ -316,41 +320,55 @@ class DNSZoneEditor(QMainWindow):
         return data
     def add_record(self):
         try:
-            # Получение значений из элементов интерфейса
+            # Getting values from interface elements
             name = self.name_edit.text()
             record_type = self.type_combo.currentText()
             value = self.value_edit.text()
 
-            # Проверка типа первой записи
+            # Checking the type of the first record
             if len(self.domain_names) == 0 and record_type != 'A':
-                QMessageBox.critical(self, "Ошибка", "Первая запись должна иметь тип 'A'")
+                QMessageBox.critical(self, "Error", "The first record must have type 'A'")
                 return
 
-            # Получение выбранного родительского домена
+            # Validating the domain name
+            if not self.validate_domain_name(name):
+                QMessageBox.critical(self, "Error", "Invalid domain name")
+                return
+
+            # Validating the IP address for 'A' record type
+            if record_type == 'A' and not self.validate_ip_address(value):
+                QMessageBox.critical(self, "Error", "Invalid IP address")
+                return
+
+            # Getting the selected parent domain
             parent_domain = self.parent_domain_combo.currentText()
 
-            # Если выбран родитель, добавляем его имя к имени записи через точку
+            # If a parent domain is selected, append its name to the record name separated by a dot
             if parent_domain:
                 name = f"{name}.{parent_domain}"
 
-            # Создание нового элемента дерева
+            # Creating a new tree item
             item = QTreeWidgetItem([name, record_type, value])
 
-            # Если выбран родитель, добавляем запись как дочернюю для выбранного родителя
+            # If a parent domain is selected, add the record as a child to the selected parent
             if parent_domain:
-                parent_item = self.get_tree_item_by_name(parent_domain)
+                parent_item = self.domain_items.get(parent_domain)
                 if parent_item:
                     parent_item.addChild(item)
 
-            # Если не выбран родитель, добавляем запись как верхний уровень дерева
+            # If no parent domain is selected, add the record as a top-level item
             else:
                 self.tree_widget.addTopLevelItem(item)
 
-            # Добавление имени домена в combobox Родительский домен
+            # Adding the domain name to the Parent Domain combobox
             self.parent_domain_combo.addItem(name)
 
-            # Добавление имени домена в список
+            # Adding the domain name to the list
             self.domain_names.append(name)
+
+            # Adding the item to the domain_items dictionary
+            self.domain_items[name] = item
+
         except ValueError as e:
             self.display_error_message(str(e))
             return
@@ -358,6 +376,8 @@ class DNSZoneEditor(QMainWindow):
             error_message = f"An error occurred while adding the record: {str(e)}"
             self.display_error_message(error_message)
             traceback.print_exc()
+
+
 
     def show_context_menu(self, pos):
         # Создание контекстного меню
@@ -404,42 +424,6 @@ class DNSZoneEditor(QMainWindow):
             if item.text(0) == name:
                 return item
         return None
-
-    def validate_ip_address(self, ip_address):
-        ip_regex = QRegExp(
-            r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
-        )
-        ip_validator = QRegExpValidator(ip_regex, self)
-
-        if ip_validator.validate(ip_address, 0)[0] == QValidator.Acceptable:
-            return True
-        else:
-            return False
-
-    def open_image_window(self):
-        root = self.tree_widget.invisibleRootItem()
-        data = self.get_tree_data(root)
-
-
-        edges = []
-
-        def get_edges(treedict, parent=None):
-            name = next(iter(treedict.keys()))
-            if parent is not None and parent != "":
-                edges.append((parent, name))
-            if "children" in treedict[name]:
-                for item in treedict[name]["children"]:
-                    if isinstance(item, dict):
-                        get_edges(item, parent=name)
-                    else:
-                        edges.append((name, item))
-
-        get_edges(data)
-        output = 'strict digraph tree {\n'
-        for row in edges:
-            output += '    {0} -> {1};\n'.format(*row)
-        output += '}'
-        graph = graphviz.Source(output)
 
     def generate_json(self):
         root = self.tree_widget.invisibleRootItem()
@@ -489,6 +473,22 @@ class DNSZoneEditor(QMainWindow):
 
         except Exception as e:
             print("Произошла ошибка:", str(e))
+
+    def validate_domain_name(self, name):
+        # Check if name contains only alphanumeric characters and dots (if records exist)
+        if self.domain_names:
+            pattern = r'^[a-zA-Zа-яА-Я0-9.]+$'
+            return re.match(pattern, name)
+
+        # If no records exist, allow any character, including dots
+        return True
+
+    def validate_ip_address(self, ip_address):
+        ip_regex = re.compile(
+            r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
+        )
+        return bool(ip_regex.match(ip_address))
+
 
     def display_error_message(self, error_message):
         QMessageBox.critical(self, "Error", error_message)
