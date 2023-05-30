@@ -16,6 +16,74 @@ from paramiko.client import SSHClient, AutoAddPolicy
 from paramiko.sftp_client import SFTPClient
 
 
+def check_dns_zone(server_ip, zone_name):
+    # Ваша функция проверки зоны DNS
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(server_ip, username='aleks', password='12345')
+
+    # Команда для проверки наличия зоны
+    zone_command = f"ls /etc/bind/zones/{zone_name}.zone"
+    stdin, stdout, stderr = ssh.exec_command(zone_command)
+    zone_output = stdout.read().decode().strip()
+
+    # Команда для перезапуска сервиса bind9
+    restart_command = "sudo service bind9 restart"
+    stdin, stdout, stderr = ssh.exec_command(restart_command)
+    restart_output = stdout.read().decode().strip()
+
+    # Команда для проверки статуса сервиса bind9
+    status_command = "sudo service bind9 status"
+    stdin, stdout, stderr = ssh.exec_command(status_command)
+    status_output = stdout.read().decode().strip()
+
+    ssh.close()
+    result = f"Статус сервиса bind9:\n{status_output}"
+    result += f"Результат проверки зоны {zone_name}:\n"
+    result += f"Зона {zone_name}: {'найдена' if zone_output else 'не найдена'}\n"
+
+    return result
+
+class Ui_Ping(object):
+    def setupUi(self, Ping):
+        Ping.setObjectName("Ping")
+        Ping.resize(890, 391)
+        self.text_browser = QtWidgets.QTextBrowser(Ping)
+        self.text_browser.setGeometry(QtCore.QRect(10, 30, 851, 221))
+        self.text_browser.setObjectName("text_browser")
+        self.button = QtWidgets.QPushButton(Ping)
+        self.button.clicked.connect(self.check_zone)
+        self.button.setGeometry(QtCore.QRect(10, 330, 120, 40))
+
+        self.button.setObjectName("button")
+        self.name_server = QtWidgets.QLabel(Ping)
+        self.name_server.setGeometry(QtCore.QRect(10, 260, 191, 31))
+        font = QtGui.QFont()
+        font.setFamily("Corbel")
+        font.setPointSize(12)
+        self.name_server.setFont(font)
+        self.name_server.setObjectName("name_server")
+        self.line_edit = QtWidgets.QLineEdit(Ping)
+        self.line_edit.setGeometry(QtCore.QRect(10, 295, 241, 22))
+        self.line_edit.setObjectName("line_edit")
+
+        self.retranslateUi(Ping)
+        QtCore.QMetaObject.connectSlotsByName(Ping)
+
+    def retranslateUi(self, Ping):
+        _translate = QtCore.QCoreApplication.translate
+        Ping.setWindowTitle(_translate("Ping", "Проверка DNS зоны"))
+        self.button.setText(_translate("Ping", "Проверить"))
+        self.name_server.setText(_translate("Ping", "Название DNS Зоны:"))
+
+
+    def check_zone(self):
+        zone_name = self.line_edit.text()
+        server_ip = '192.168.31.159'  # Укажите здесь необходимый IP-адрес удаленного сервера
+        result = check_dns_zone(server_ip, zone_name)
+        self.text_browser.setText(result)
+        print(result)
+
 class DNSZoneEditor(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -37,6 +105,10 @@ class DNSZoneEditor(QMainWindow):
         # Create line edits
         self.save_button = QPushButton("Save")
         self.save_button.clicked.connect(self.save_zone)
+        self.ping_button = QPushButton("Ping")
+        self.ping_button.clicked.connect(self.open_ping_window)
+        self.json_button = QPushButton("Generate JSON")
+        self.json_button.clicked.connect(self.generate_json)
 
         self.parent_domain_combo = QComboBox()
         self.name_edit = QLineEdit()
@@ -65,6 +137,10 @@ class DNSZoneEditor(QMainWindow):
         form_layout.addWidget(QLabel("Value:"))
         form_layout.addWidget(self.value_edit)
         form_layout.addWidget(self.add_button)
+        form_layout.addWidget(self.ping_button)
+        form_layout.addWidget(self.json_button)
+
+
 
         form_widget = QWidget()
         form_widget.setLayout(form_layout)
@@ -83,6 +159,12 @@ class DNSZoneEditor(QMainWindow):
 
         self.tree_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree_widget.customContextMenuRequested.connect(self.show_context_menu)
+
+    def open_ping_window(self):
+        ping_window = QDialog()
+        ping_ui = Ui_Ping()
+        ping_ui.setupUi(ping_window)
+        ping_window.exec_()
 
     def save_zone(self):
         try:
@@ -315,6 +397,21 @@ class DNSZoneEditor(QMainWindow):
             return True
         else:
             return False
+
+    def generate_json(self):
+        root = self.tree_widget.invisibleRootItem()
+        data = self.get_tree_data(root)
+        json_data = json.dumps(data, indent=4)
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save JSON File",
+            "",
+            "JSON Files (*.json)"
+        )
+        if file_path:
+            with open(file_path, "w") as file:
+                file.write(json_data)
 
     def display_error_message(self, error_message):
         QMessageBox.critical(self, "Error", error_message)
