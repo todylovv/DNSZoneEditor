@@ -18,7 +18,7 @@ from PyQt5.QtCore import Qt
 class SSHFileReader(QDialog):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Чтение и сохранение файлов через SSH")
+        self.setWindowTitle("Чтение и сохранение файлов")
         self.resize(800, 600)  # Установка размеров окна
         self.layout = QVBoxLayout()
         self.path_input = QLineEdit()
@@ -31,6 +31,9 @@ class SSHFileReader(QDialog):
         self.button_save = QPushButton("Сохранить файл")
         self.button_save.clicked.connect(self.save_file)
         self.layout.addWidget(self.button_save)
+        self.button_delete = QPushButton("Удалить файл")
+        self.button_delete.clicked.connect(self.delete_file)
+        self.layout.addWidget(self.button_delete)
         self.setLayout(self.layout)
 
         self.hostname = "192.168.31.159"
@@ -94,6 +97,30 @@ class SSHFileReader(QDialog):
 
         finally:
             ssh.close()
+
+    def delete_file(self):
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            ssh.connect(self.hostname, username=self.username, password=self.password)
+
+            name = self.path_input.text()
+            path = f"/etc/bind/zones/{name}.zone"
+
+            sftp = ssh.open_sftp()
+            sftp.remove(path)
+
+            sftp.close()
+            ssh.close()
+            print("Файл успешно удален.")
+        except paramiko.AuthenticationException:
+            print("Ошибка аутентификации. Пожалуйста, проверьте учетные данные.")
+        except paramiko.SSHException as ssh_exception:
+            print(f"Ошибка SSH: {str(ssh_exception)}")
+        except paramiko.SFTPError as sftp_error:
+            print(f"Ошибка SFTP: {str(sftp_error)}")
+        except Exception as e:
+            print(f"Произошла ошибка: {str(e)}")
 
     def show_error_message(self, title, message):
         error_message = QMessageBox()
