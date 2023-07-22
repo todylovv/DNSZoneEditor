@@ -1,36 +1,225 @@
+# Импорт библиотек
+import re
 import sys
 import json
-
+import traceback
 import graphviz
-from PyQt5.QtCore import QRegExp
-from PyQt5.QtGui import QRegExpValidator, QValidator, QPixmap, QIcon, QPalette, QColor
+import paramiko
+from PyQt5.QtGui import QPixmap, QPalette, QColor
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QWidget, QLabel, QLineEdit, QComboBox, QPushButton,
-    QTreeWidget, QTreeWidgetItem, QMessageBox, QFileDialog, QGraphicsView, QGraphicsScene, QDialog, QStyleFactory
+    QTreeWidget, QTreeWidgetItem, QMessageBox, QFileDialog, QDialog, QStyleFactory,
+    QMenu, QAction, QTextEdit, QGridLayout
 )
+from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtCore import Qt
+
+
+class SSHFileReader(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Чтение и сохранение файлов")
+        self.resize(800, 600)  # Установка размеров окна
+        self.layout = QVBoxLayout()
+        self.path_input = QLineEdit()
+        self.layout.addWidget(self.path_input)
+        self.button_read = QPushButton("Читать файл")
+        self.button_read.clicked.connect(self.read_file)
+        self.layout.addWidget(self.button_read)
+        self.output_text = QTextEdit()
+        self.layout.addWidget(self.output_text)
+        self.button_save = QPushButton("Сохранить файл")
+        self.button_save.clicked.connect(self.save_file)
+        self.layout.addWidget(self.button_save)
+        self.button_delete = QPushButton("Удалить файл")
+        self.button_delete.clicked.connect(self.delete_file)
+        self.layout.addWidget(self.button_delete)
+        self.setLayout(self.layout)
+
+        self.hostname = "192.168.31.159"
+        self.username = "aleks"
+        self.password = "12345"
+
+    def read_file(self):
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        try:
+            ssh.connect(self.hostname, username=self.username, password=self.password)
+            name = self.path_input.text()
+            path = f"/etc/bind/zones/{name}.zone"
+
+            stdin, stdout, stderr = ssh.exec_command(f"cat {path}")
+            output = stdout.read().decode()
+
+            self.output_text.setText(output)
+
+        except paramiko.AuthenticationException:
+            self.show_error_message("Ошибка аутентификации", "Не удалось аутентифицироваться на SSH-сервере.")
+        except paramiko.SSHException as e:
+            self.show_error_message("Ошибка SSH", f"Произошла ошибка SSH: {str(e)}")
+        except paramiko.ChannelException as e:
+            self.show_error_message("Ошибка канала", f"Произошла ошибка при открытии SSH-канала: {str(e)}")
+        except Exception as e:
+            self.show_error_message("Ошибка", f"Произошла ошибка: {str(e)}")
+
+        finally:
+            ssh.close()
+
+    def save_file(self):
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        try:
+            ssh.connect(self.hostname, username=self.username, password=self.password)
+            name = self.path_input.text()
+            path = f"/etc/bind/zones/{name}.zone"
+
+            file_contents = self.output_text.toPlainText().encode()
+
+            sftp = ssh.open_sftp()
+            with sftp.open(path, 'w') as file:
+                file.write(file_contents)
+
+            sftp.close()
+
+            QMessageBox.information(self, "Успех", "Сохранение прошло успешно!")
+
+
+        except paramiko.AuthenticationException:
+            self.show_error_message("Ошибка аутентификации", "Не удалось аутентифицироваться на SSH-сервере.")
+        except paramiko.SSHException as e:
+            self.show_error_message("Ошибка SSH", f"Произошла ошибка SSH: {str(e)}")
+        except paramiko.ChannelException as e:
+            self.show_error_message("Ошибка канала", f"Произошла ошибка при открытии SSH-канала: {str(e)}")
+        except Exception as e:
+            self.show_error_message("Ошибка", f"Произошла ошибка: {str(e)}")
+
+        finally:
+            ssh.close()
+
+    def delete_file(self):
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            ssh.connect(self.hostname, username=self.username, password=self.password)
+
+            name = self.path_input.text()
+            path = f"/etc/bind/zones/{name}.zone"
+
+            sftp = ssh.open_sftp()
+            sftp.remove(path)
+
+            sftp.close()
+            ssh.close()
+            print("Файл успешно удален.")
+        except paramiko.AuthenticationException:
+            print("Ошибка аутентификации. Пожалуйста, проверьте учетные данные.")
+        except paramiko.SSHException as ssh_exception:
+            print(f"Ошибка SSH: {str(ssh_exception)}")
+        except paramiko.SFTPError as sftp_error:
+            print(f"Ошибка SFTP: {str(sftp_error)}")
+        except Exception as e:
+            print(f"Произошла ошибка: {str(e)}")
+
+    def show_error_message(self, title, message):
+        error_message = QMessageBox()
+        error_message.setIcon(QMessageBox.Warning)
+        error_message.setWindowTitle(title)
+        error_message.setText(message)
+        error_message.exec_()
+
 
 
 class ImageViewer(QDialog):
     def __init__(self, image_path):
         super().__init__()
-        self.setWindowTitle("Image Viewer")
-        QApplication.setStyle(QStyleFactory.create("Fusion"))
+        self.setWindowTitle("Просмотр дерева")  # Устанавливаем заголовок окна "Просмотр изображения"
+        QApplication.setStyle(QStyleFactory.create("Fusion"))  # Устанавливаем стиль приложения в стиле "Fusion"
+        layout = QVBoxLayout()  # Создаем вертикальное расположение элементов
+        image_label = QLabel()  # Создаем метку для изображения
+        layout.addWidget(image_label)  # Добавляем метку в расположение
+        pixmap = QPixmap(image_path)  # Создаем pixmap (рисунок) на основе пути к изображению
+        image_label.setPixmap(pixmap)  # Устанавливаем pixmap в качестве изображения для метки
+        self.setLayout(layout)  # Устанавливаем созданное расположение как основное расположение окна
 
 
-        layout = QVBoxLayout()
 
-        image_label = QLabel()
-        layout.addWidget(image_label)
+def check_dns_zone(server_ip, zone_name):
+    # Функция для проверки зоны DNS
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(server_ip, username='aleks', password='12345')
 
-        pixmap = QPixmap(image_path)
-        image_label.setPixmap(pixmap)
-        self.setLayout(layout)
+    # Команда для проверки наличия зоны
+    zone_command = f"ls /etc/bind/zones/{zone_name}.zone"
+    stdin, stdout, stderr = ssh.exec_command(zone_command)
+    zone_output = stdout.read().decode().strip()
 
+    # Команда для перезапуска сервиса bind9
+    restart_command = "sudo service bind9 restart"
+    stdin, stdout, stderr = ssh.exec_command(restart_command)
+    restart_output = stdout.read().decode().strip()
+
+    # Команда для проверки статуса сервиса bind9
+    status_command = "sudo service bind9 status"
+    stdin, stdout, stderr = ssh.exec_command(status_command)
+    status_output = stdout.read().decode().strip()
+
+    ssh.close()
+    result = f"Статус сервиса bind9:\n{status_output}"
+    result += f"Результат проверки зоны {zone_name}:\n"
+    result += f"Зона {zone_name}: {'найдена' if zone_output else 'не найдена'}\n"
+
+    return result
+
+class Ui_Ping(object):
+    def setupUi(self, Ping):
+        Ping.setObjectName("Ping")
+        Ping.resize(890, 391)
+        self.text_browser = QtWidgets.QTextBrowser(Ping)
+        self.text_browser.setGeometry(QtCore.QRect(10, 30, 851, 221))
+        self.text_browser.setObjectName("text_browser")
+        self.button = QtWidgets.QPushButton(Ping)
+        self.button.clicked.connect(self.check_zone)
+        self.button.setGeometry(QtCore.QRect(10, 330, 120, 40))
+
+        self.button.setObjectName("button")
+        self.name_server = QtWidgets.QLabel(Ping)
+        self.name_server.setGeometry(QtCore.QRect(10, 260, 191, 31))
+        font = QtGui.QFont()
+        font.setFamily("Corbel")
+        font.setPointSize(12)
+        self.name_server.setFont(font)
+        self.name_server.setObjectName("name_server")
+        self.line_edit = QtWidgets.QLineEdit(Ping)
+        self.line_edit.setGeometry(QtCore.QRect(10, 295, 241, 22))
+        self.line_edit.setObjectName("line_edit")
+
+        self.retranslateUi(Ping)
+        QtCore.QMetaObject.connectSlotsByName(Ping)
+
+    def retranslateUi(self, Ping):
+        _translate = QtCore.QCoreApplication.translate
+        Ping.setWindowTitle(_translate("Ping", "Проверка DNS зоны"))
+        self.button.setText(_translate("Ping", "Проверить"))
+        self.name_server.setText(_translate("Ping", "Название DNS Зоны:"))
+
+
+    def check_zone(self):
+        zone_name = self.line_edit.text()
+        server_ip = '192.168.31.159'  # Укажите здесь необходимый IP-адрес удаленного сервера
+        result = check_dns_zone(server_ip, zone_name)
+        self.text_browser.setText(result)
+        print(result)
 
 class DNSZoneEditor(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("DNS Zone Editor")
+
+        self.domain_items = {}  # Dictionary to store domain items
+
+        self.setWindowTitle("Редактор DNS зон")
 
         QApplication.setStyle(QStyleFactory.create("Fusion"))
         palette = QPalette()
@@ -44,22 +233,25 @@ class DNSZoneEditor(QMainWindow):
         palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
         QApplication.setPalette(palette)
 
-
-        # Create line edits
-        self.json_button = QPushButton("Generate JSON")
+        self.save_button = QPushButton("Сохранить")
+        self.save_button.clicked.connect(self.save_zone)
+        self.ping_button = QPushButton("Проверка существования зоны")
+        self.ping_button.clicked.connect(self.open_ping_window)
+        self.json_button = QPushButton("Генерация JSON")
         self.json_button.clicked.connect(self.generate_json)
-
-        self.image_button = QPushButton("Open Image")
+        self.image_button = QPushButton("Открытие дерева")
         self.image_button.clicked.connect(self.open_image_window)
+        self.read_button = QPushButton("Редактирование файла")
+        self.read_button.clicked.connect(self.read_file_and_save)
 
         self.parent_domain_combo = QComboBox()
         self.name_edit = QLineEdit()
         self.type_combo = QComboBox()
         self.value_edit = QLineEdit()
 
-        self.type_combo.addItems(["A", "TXT", "CNAME"])
+        self.type_combo.addItems(["A", "TXT", "CNAME", "MX"])
 
-        self.add_button = QPushButton("Add")
+        self.add_button = QPushButton("Добавить")
         self.add_button.clicked.connect(self.add_record)
 
         self.tree_widget = QTreeWidget()
@@ -67,64 +259,287 @@ class DNSZoneEditor(QMainWindow):
 
         self.domain_hierarchy = {}
 
-        layout = QVBoxLayout()
-        layout.addWidget(self.json_button)
+        layout = QGridLayout()
 
-        form_layout = QVBoxLayout()
-        form_layout.addWidget(QLabel("Parent Domain:"))
-        form_layout.addWidget(self.parent_domain_combo)
-        form_layout.addWidget(QLabel("Name:"))
-        form_layout.addWidget(self.name_edit)
-        form_layout.addWidget(QLabel("Type:"))
-        form_layout.addWidget(self.type_combo)
-        form_layout.addWidget(QLabel("Value:"))
-        form_layout.addWidget(self.value_edit)
-        form_layout.addWidget(self.add_button)
+        layout.addWidget(QLabel("Родительский домен:"), 0, 0)
+        layout.addWidget(self.parent_domain_combo, 0, 1)
+        layout.addWidget(QLabel("Имя:"), 1, 0)
+        layout.addWidget(self.name_edit, 1, 1)
+        layout.addWidget(QLabel("Тип:"), 2, 0)
+        layout.addWidget(self.type_combo, 2, 1)
+        layout.addWidget(QLabel("Значение:"), 3, 0)
+        layout.addWidget(self.value_edit, 3, 1)
+        layout.addWidget(self.add_button, 4, 0, 1, 2)
+        layout.addWidget(self.ping_button, 5, 0, 1, 2)
+        layout.addWidget(self.json_button, 6, 0, 1, 2)
+        layout.addWidget(self.image_button, 7, 0, 1, 2)
+        layout.addWidget(self.read_button, 8, 0, 1, 2)
 
-        form_widget = QWidget()
-        form_widget.setLayout(form_layout)
+        layout.addWidget(self.tree_widget, 0, 2, 9, 1)
 
-        layout.addWidget(form_widget)
-        layout.addWidget(self.tree_widget)
-        layout.addWidget(self.image_button)
+        layout.addWidget(self.save_button, 9, 0, 1, 3)
 
         central_widget = QWidget()
         central_widget.setLayout(layout)
         self.setCentralWidget(central_widget)
 
-    def open_image_window(self):
-        data = self.get_tree_data()
+        self.domain_names = []
 
-        edges = []
+        self.tree_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree_widget.customContextMenuRequested.connect(self.show_context_menu)
 
-        def get_edges(treedict, parent=None):
-            name = next(iter(treedict.keys()))
-            if parent is not None and parent != "":
-                edges.append((parent, name))
-            if "children" in treedict[name]:
-                for item in treedict[name]["children"]:
-                    if isinstance(item, dict):
-                        get_edges(item, parent=name)
-                    else:
-                        edges.append((name, item))
 
-        get_edges(data)
+    def open_ping_window(self):
+        try:
+            ping_window = QDialog()
+            ping_ui = Ui_Ping()
+            ping_ui.setupUi(ping_window)
+            ping_window.exec_()
+        except Exception as e:
+            error_message = f"Произошла ошибка: {str(e)}"
+            error_box = QMessageBox()
+            error_box.setIcon(QMessageBox.Critical)
+            error_box.setWindowTitle("Ошибка")
+            error_box.setText(error_message)
+            error_box.setStandardButtons(QMessageBox.Ok)
+            error_box.exec_()
 
-        output = 'strict digraph tree {\n'
-        for row in edges:
-            output += '    {0} -> {1};\n'.format(*row)
-        output += '}'
-        graph = graphviz.Source(output)
+    def save_zone(self):
+        try:
+            # Получение данных из дерева записей
+            root = self.tree_widget.invisibleRootItem()
+            data = self.get_tree_data(root)
 
-        # Save the graph as an image file
-        graph.render(filename='graph', format='png', cleanup=True)
+            def dict_to_dns_zone(domain, data):
+                # Создание пустого списока для хранения строк записей зоны DNS
+                zone_lines = []
+                # Проход по данным и создание строки каждой записи
+                for entry in data:
+                    name = entry['name']
+                    record_type = entry['type']
+                    value = entry['value']
+                    zone_line = f"{name} IN {record_type} {value}"
+                    zone_lines.append(zone_line)
+                return zone_lines
 
-        image_path = "graph.png"  # Replace with the actual path to the image
-        image_viewer = ImageViewer(image_path)
-        image_viewer.exec_()
+            parent_domain = data[0]['name']
+            domain = data[0]['name']
+
+            zone_file_lines = []
+            zone_file_lines.append("$TTL 604800")
+            zone_file_lines.append(f"@ IN SOA ns1.{parent_domain}. hostmaster.{parent_domain}. (")
+            zone_file_lines.append("    2023052901 ; Serial")
+            zone_file_lines.append("    3600       ; Refresh")
+            zone_file_lines.append("    1800       ; Retry")
+            zone_file_lines.append("    604800     ; Expire")
+            zone_file_lines.append("    86400      ; Negative Cache TTL")
+            zone_file_lines.append(")")
+            zone_file_lines.append(f"@ IN NS ns1.{parent_domain}.")
+            zone_file_lines.append("")
+            zone_file_lines.append("ns1 IN A 192.168.0.100")
+            zone_file_lines.append(f"{parent_domain} IN A 192.168.31.1")
+
+            zone_file_lines.extend(dict_to_dns_zone(domain, data))
+            zone_file_content = '\n'.join(zone_file_lines)
+            zone_file_content += '\n'
+
+            # Параметры соединения SSH
+            hostname = '192.168.31.159'
+            username = 'aleks'
+            password = '12345'
+            port = 22
+
+            # Инициализация SSH-клиента
+            client = paramiko.SSHClient()
+            client.load_system_host_keys()  # Загрузка ключей хоста системы
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            try:
+                # Подключение к серверу Ubuntu
+                client.connect(hostname, port, username, password)
+
+                # Удаление существующего файла helloworld.com.zone, если он существует
+                _, stdout, stderr = client.exec_command('rm /etc/bind/zones/{}.zone'.format(parent_domain))
+                print(stdout.read().decode())
+                print(stderr.read().decode())
+
+                # Определение содержимого зоны DNS
+                dns_zone_content = zone_file_content
+
+                # Создание временного файла для хранения содержимого зоны DNS
+                with open('dns_zone.txt', 'w') as zone_file:
+                    zone_file.write(dns_zone_content)
+
+                # Загрузка файла на удаленный сервер
+                transport = client.get_transport()
+                sftp = paramiko.SFTPClient.from_transport(transport)
+                sftp.put('dns_zone.txt', '/etc/bind/zones/{}.zone'.format(parent_domain))
+                sftp.close()
+
+                # Чтение содержимого named.conf.local
+                _, stdout, _ = client.exec_command('cat /etc/bind/named.conf.local')
+                named_conf_default_zones_content = stdout.read().decode()
+
+                # Проверка, существует ли уже конфигурация зоны в named.conf.local
+                if f'zone "{parent_domain}.com"' in named_conf_default_zones_content:
+                    print('Конфигурация зоны уже существует в named.conf.local. Пропуск...')
+                else:
+                    # Добавление конфигурации зоны в named.conf.local
+                    append_command = f'echo \'zone "{parent_domain}" {{ type master; file "/etc/bind/zones/{parent_domain}.zone"; }};\' | sudo -S tee -a /etc/bind/named.conf.local '
+
+                    _, stdout, stderr = client.exec_command(append_command)
+                    print(stdout.read().decode())
+                    print(stderr.read().decode())
+
+                    # Выполнение команды для перезапуска DNS-сервера
+                    _, stdout, stderr = client.exec_command('sudo systemctl restart bind9')
+                    print(stdout.read().decode())
+                    print(stderr.read().decode())
+
+            except Exception as e:
+                error_message = f"Произошла ошибка при сохранении зоны: {str(e)}"
+                self.display_error_message(error_message)
+                traceback.print_exc()
+            finally:
+                if client:
+                    client.close()
+        except Exception as e:
+            error_message = f"Произошла ошибка при сохранении зоны: {str(e)}"
+            self.display_error_message(error_message)
+            traceback.print_exc()
+
+    def get_tree_data(self, parent_item):
+        try:
+            data = []
+            for i in range(parent_item.childCount()):
+                item = parent_item.child(i)
+                name = item.text(0)
+                record_type = item.text(1)
+                value = item.text(2)
+                children = self.get_tree_data(item)
+                data.append({
+                    'name': name,
+                    'type': record_type,
+                    'value': value,
+                    'children': children
+                })
+            return data
+        except Exception as e:
+            error_message = f"Произошла ошибка при получении данных из дерева: {str(e)}"
+            self.display_error_message(error_message)
+            traceback.print_exc()
+
+    def add_record(self):
+        try:
+            # Получение значений из элементов интерфейса
+            name = self.name_edit.text()
+            record_type = self.type_combo.currentText()
+            value = self.value_edit.text()
+
+            # Проверка типа первой записи
+            if len(self.domain_names) == 0 and record_type != 'A':
+                QMessageBox.critical(self, "Ошибка", "Первая запись должна иметь тип 'A'")
+                return
+
+            # Проверка валидности доменного имени
+            if not self.validate_domain_name(name):
+                QMessageBox.critical(self, "Ошибка", "Некорректное доменное имя")
+                return
+
+            # Проверка валидности IP-адреса для записи типа 'A'
+            if record_type == 'A' and not self.validate_ip_address(value):
+                QMessageBox.critical(self, "Ошибка", "Некорректный IP-адрес")
+                return
+
+            # Проверка формата значения для записи типа 'MX'
+            if record_type == 'MX':
+                if not re.match(r'^\d{2} .+$', value):
+                    QMessageBox.critical(self, "Ошибка", "Некорректный формат значения для записи типа 'MX'")
+                    return
+
+            # Получение выбранного родительского домена
+            parent_domain = self.parent_domain_combo.currentText()
+
+            # Если выбран родительский домен, добавить его имя к имени записи, разделенное точкой
+            if parent_domain:
+                name = f"{name}.{parent_domain}"
+
+            # Создание нового элемента дерева
+            item = QTreeWidgetItem([name, record_type, value])
+
+            # Если выбран родительский домен, добавить запись в качестве дочернего элемента к выбранному родителю
+            if parent_domain:
+                parent_item = self.domain_items.get(parent_domain)
+                if parent_item:
+                    parent_item.addChild(item)
+
+            # Если не выбран родительский домен, добавить запись как элемент верхнего уровня
+            else:
+                self.tree_widget.addTopLevelItem(item)
+
+            # Добавление имени домена в комбобокс родительского домена
+            self.parent_domain_combo.addItem(name)
+
+            # Добавление имени домена в список
+            self.domain_names.append(name)
+
+            # Добавление элемента в словарь domain_items
+            self.domain_items[name] = item
+
+        except ValueError as e:
+            self.display_error_message(str(e))
+            return
+        except Exception as e:
+            error_message = f"Произошла ошибка при добавлении записи: {str(e)}"
+            self.display_error_message(error_message)
+            traceback.print_exc()
+
+    def show_context_menu(self, pos):
+        # Создание контекстного меню
+        context_menu = QMenu(self)
+        delete_action = QAction("Удалить", self)
+        delete_action.triggered.connect(self.delete_record)
+        context_menu.addAction(delete_action)
+
+        # Определение позиции контекстного меню
+        header_height = self.tree_widget.header().height()
+        context_menu.exec_(self.tree_widget.viewport().mapToGlobal(pos + QtCore.QPoint(0, header_height)))
+
+    def delete_record(self):
+        # Получение выбранной записи
+        selected_item = self.tree_widget.currentItem()
+        if selected_item is None:
+            return
+
+        # Получение имени выбранной записи
+        selected_name = selected_item.text(0)
+
+        # Удаление записи из дерева
+        parent = selected_item.parent()
+        if parent:
+            parent.removeChild(selected_item)
+        else:
+            self.tree_widget.invisibleRootItem().removeChild(selected_item)
+
+        # Удаление имени выбранной записи из combobox Родительский домен
+        self.parent_domain_combo.removeItem(self.parent_domain_combo.findText(selected_name))
+
+        # Удаление имени выбранной записи из списка
+        self.domain_names.remove(selected_name)
+
+    def get_tree_item_by_name(self, name):
+        # Поиск элемента дерева по имени
+        root = self.tree_widget.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            if item.text(0) == name:
+                return item
+        return None
 
     def generate_json(self):
-        data = self.get_tree_data()
+        # Генерация json файла
+        root = self.tree_widget.invisibleRootItem()
+        data = self.get_tree_data(root)
         json_data = json.dumps(data, indent=4)
 
         file_path, _ = QFileDialog.getSaveFileName(
@@ -133,145 +548,63 @@ class DNSZoneEditor(QMainWindow):
             "",
             "JSON Files (*.json)"
         )
-
         if file_path:
             with open(file_path, "w") as file:
                 file.write(json_data)
 
-        print(json.dumps(data, indent=4), file=sys.stderr)
+    def open_image_window(self):
+        try:
+            root = self.tree_widget.invisibleRootItem()
+            data = self.get_tree_data(root)
 
-        edges = []
+            edges = []
 
-        def get_edges(treedict, parent=None):
-            name = next(iter(treedict.keys()))
-            if parent is not None and parent != "":
-                edges.append((parent, name))
-            if "children" in treedict[name]:
-                for item in treedict[name]["children"]:
+            def get_edges(treedict, parent=None):
+                for item in treedict:
                     if isinstance(item, dict):
-                        get_edges(item, parent=name)
+                        name = item['name'].replace('"', r'\"').replace('\\', r'\\')
+                        if parent is not None and parent != "":
+                            edges.append((parent, name))
+                        if "children" in item and isinstance(item['children'], list):
+                            get_edges(item['children'], parent=name)
                     else:
-                        edges.append((name, item))
+                        edges.append((parent, item))
 
-        get_edges(data)
+            get_edges(data)
+            print(data)
+            output = 'strict digraph tree {\n'
+            for row in edges:
+                output += '    "{0}" -> "{1}";\n'.format(*row)
+            output += '}'
+            print(output)
+            graph = graphviz.Source(output)
+            graph.render(filename='graph', format='png', cleanup=True)
+            image_path = "graph.png"  # Замените на фактический путь к изображению
+            image_viewer = ImageViewer(image_path)
+            image_viewer.exec_()
 
-        print('strict digraph tree {')
-        for row in edges:
-            print('    {0} -> {1};'.format(*row))
-        print('}')
+        except Exception as e:
+            print("Произошла ошибка:", str(e))
 
-    def get_tree_data(self):
-        top_level_items = self.tree_widget.invisibleRootItem().takeChildren()
-        data = {}
-        for item in top_level_items:
-            self.recursive_tree_data(item, data)
-        return data
+    def read_file_and_save(self):
+        ssh_file_reader = SSHFileReader()
+        ssh_file_reader.exec_()
 
-    def recursive_tree_data(self, tree_item, parent_dict):
-        domain = tree_item.text(0)
-        record_type = tree_item.text(1)
-        value = tree_item.text(2)
+    def validate_domain_name(self, name):
+        # Проверка, содержит ли имя только буквенно-цифровые символы и точки (если записи существуют)
+        if self.domain_names:
+            pattern = r'^[a-zA-Zа-яА-Я0-9.]+$'
+            return re.match(pattern, name)
 
-        child_count = tree_item.childCount()
-        if child_count > 0:
-            children = []
-            for i in range(child_count):
-                child_item = tree_item.child(i)
-                child_data = {}
-                self.recursive_tree_data(child_item, child_data)
-                children.append(child_data)
-            item_data = {"type": record_type, "value": value, "children": children}
-        else:
-            item_data = {"type": record_type, "value": value}
-
-        parent_dict[domain] = item_data
-
-    def add_record(self):
-        if self.parent_domain_combo.currentIndex() == -1 and len(self.domain_hierarchy) > 0:
-            error_message = "Please select a parent domain."
-            self.display_error_message(error_message)
-            return
-
-        parent_domain = self.parent_domain_combo.currentText()
-        name = self.name_edit.text()
-        record_type = self.type_combo.currentText()
-        value = self.value_edit.text()
-
-        if parent_domain == "":
-            domain = name
-        else:
-            domain = f"{name}.{parent_domain}"
-
-        if record_type == "A":
-            if not self.validate_ip_address(value):
-                error_message = "Invalid IP address. Please enter a valid IP address."
-                self.display_error_message(error_message)
-                return
-        else:
-            value = value.strip()
-
-        if parent_domain in self.domain_hierarchy:
-            parent_item = self.domain_hierarchy[parent_domain]["item"]
-        else:
-            parent_item = QTreeWidgetItem(self.tree_widget, [parent_domain])
-            self.domain_hierarchy[parent_domain] = {"item": parent_item}
-
-        child_item = QTreeWidgetItem(parent_item, [name, record_type, value])
-
-        parent_item.addChild(child_item)
-
-        parent_item.setExpanded(True)
-
-        self.add_to_domain_hierarchy(child_item, record_type, value)
-
-        self.update_parent_domain_combo()
-
-        self.parent_domain_combo.setCurrentIndex(0)
-        self.name_edit.clear()
-        self.value_edit.clear()
-
-        parent_domain_data = self.get_domain_data(parent_domain)
-        if parent_domain_data is not None and "children" in parent_domain_data:
-            parent_domain_data["children"][name] = {"type": record_type, "value": value}
-
-    def get_domain_data(self, domain):
-        subdomains = domain.split('.')
-        current_hierarchy = self.domain_hierarchy
-
-        for subdomain in subdomains:
-            if subdomain not in current_hierarchy:
-                return None
-            current_hierarchy = current_hierarchy[subdomain]
-
-        return current_hierarchy
-
-    def add_to_domain_hierarchy(self, item, record_type, value):
-        subdomains = item.text(0).split('.')
-        current_hierarchy = self.domain_hierarchy
-
-        for subdomain in subdomains:
-            if subdomain not in current_hierarchy:
-                current_hierarchy[subdomain] = {"item": None}
-            current_hierarchy = current_hierarchy[subdomain]
-
-        current_hierarchy["type"] = record_type
-        current_hierarchy["value"] = value
-        current_hierarchy["item"] = item
-
-    def update_parent_domain_combo(self):
-        self.parent_domain_combo.clear()
-        self.parent_domain_combo.addItems(sorted(self.domain_hierarchy.keys()))
+        # Если записей не существует, разрешены любые символы, включая точки
+        return True
 
     def validate_ip_address(self, ip_address):
-        ip_regex = QRegExp(
+        ip_regex = re.compile(
             r"^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
         )
-        ip_validator = QRegExpValidator(ip_regex, self)
+        return bool(ip_regex.match(ip_address))
 
-        if ip_validator.validate(ip_address, 0)[0] == QValidator.Acceptable:
-            return True
-        else:
-            return False
 
     def display_error_message(self, error_message):
         QMessageBox.critical(self, "Error", error_message)
